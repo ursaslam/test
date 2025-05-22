@@ -89,8 +89,12 @@ public class DynamoDBFetcher {
             int end = Math.min(i + 100, taxIdList.size());
             List<String> chunk = taxIdList.subList(i, end);
 
-            List<Map<String, AttributeValue>> keys = chunk.stream()
-                    .map(taxId -> Map.of(TAX_ID, AttributeValue.builder().s(taxId).build()))
+        List<Map<String, AttributeValue>> keys = chunk.stream()
+                    .map(taxId -> {
+                        Map<String, AttributeValue> keyMap = new HashMap<>();
+                        keyMap.put(TAX_ID, AttributeValue.builder().s(taxId).build());
+                        return keyMap;
+                    })
                     .collect(Collectors.toList());
 
             Map<String, KeysAndAttributes> requestItems = Map.of(
