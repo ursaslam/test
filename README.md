@@ -80,34 +80,36 @@ public class DynamoDBFetcher {
         } // Auto-closes the client safely here
     }
 
-    public static List<Map<String, AttributeValue>> fetchByTaxIds(DynamoDbClient dynamoDb, Set<String> taxIdSet) {
+   public static List<Map<String, AttributeValue>> fetchByTaxIds(DynamoDbClient dynamoDb, Set<String> taxIdSet) {
         List<Map<String, AttributeValue>> resultItems = new ArrayList<>();
 
-        // Chunk the tax IDs into groups of up to 100 (DynamoDB BatchGetItem limit)
         List<String> taxIdList = new ArrayList<>(taxIdSet);
         for (int i = 0; i < taxIdList.size(); i += 100) {
             int end = Math.min(i + 100, taxIdList.size());
             List<String> chunk = taxIdList.subList(i, end);
 
-        List<Map<String, AttributeValue>> keys = chunk.stream()
-                    .map(taxId -> {
-                        Map<String, AttributeValue> keyMap = new HashMap<>();
-                        keyMap.put(TAX_ID, AttributeValue.builder().s(taxId).build());
-                        return keyMap;
-                    })
-                    .collect(Collectors.toList());
+            List<Map<String, AttributeValue>> keys = new ArrayList<>();
+            for (String taxId : chunk) {
+                Map<String, AttributeValue> keyMap = new HashMap<>();
+                keyMap.put(TAX_ID, AttributeValue.builder().s(taxId).build());
+                keys.add(keyMap);
+            }
 
-            Map<String, KeysAndAttributes> requestItems = Map.of(
-                    TABLE_NAME,
-                    KeysAndAttributes.builder().keys(keys).build()
-            );
+            Map<String, KeysAndAttributes> requestItems = new HashMap<>();
+            requestItems.put(TABLE_NAME, KeysAndAttributes.builder().keys(keys).build());
 
             BatchGetItemRequest request = BatchGetItemRequest.builder()
                     .requestItems(requestItems)
                     .build();
 
             BatchGetItemResponse response = dynamoDb.batchGetItem(request);
-            resultItems.addAll(response.responses().getOrDefault(TABLE_NAME, List.of()));
+
+            if (response.hasResponses()) {
+                List<Map<String, AttributeValue>> items = response.responses().get(TABLE_NAME);
+                if (items != null) {
+                    resultItems.addAll(items);
+                }
+            }
         }
 
         return resultItems;
