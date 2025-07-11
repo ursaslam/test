@@ -1,4 +1,102 @@
 
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.*;
+import java.nio.file.Files;
+import java.util.*;
+
+public class NaicsCodeComparator {
+
+    public static void main(String[] args) throws Exception {
+        String excelPath = "src/main/resources/Filtered_Naics.xlsx";
+        String jsonPath = "src/main/resources/naicscode_list.json";
+
+        Map<String, String> excelMap = loadNaicsFromExcel(excelPath);
+        Map<String, String> jsonMap = loadNaicsFromJson(jsonPath);
+
+        Set<String> commonCodes = new HashSet<>(excelMap.keySet());
+        commonCodes.retainAll(jsonMap.keySet());
+
+        List<String> exactMatches = new ArrayList<>();
+        List<String> mismatchedDescriptions = new ArrayList<>();
+
+        for (String code : commonCodes) {
+            String excelDesc = excelMap.get(code).trim();
+            String jsonDesc = jsonMap.get(code).trim();
+            if (excelDesc.equalsIgnoreCase(jsonDesc)) {
+                exactMatches.add(code);
+            } else {
+                mismatchedDescriptions.add(code + " ➤ Excel: " + excelDesc + " | JSON: " + jsonDesc);
+            }
+        }
+
+        Set<String> onlyInExcel = new HashSet<>(excelMap.keySet());
+        onlyInExcel.removeAll(jsonMap.keySet());
+
+        Set<String> onlyInJson = new HashSet<>(jsonMap.keySet());
+        onlyInJson.removeAll(excelMap.keySet());
+
+        // Print summary
+        System.out.println("✅ Exact Code+Description Matches: " + exactMatches.size());
+        System.out.println("⚠️ Mismatched Descriptions: " + mismatchedDescriptions.size());
+        System.out.println("❌ Missing in JSON: " + onlyInExcel);
+        System.out.println("❌ Missing in Excel: " + onlyInJson);
+        System.out.println("\n🔍 Description Mismatches:");
+        mismatchedDescriptions.forEach(System.out::println);
+    }
+
+    // Excel loader: returns Map<naicsCode, naicsDescription>
+    public static Map<String, String> loadNaicsFromExcel(String filePath) throws IOException {
+        Map<String, String> map = new HashMap<>();
+        FileInputStream fis = new FileInputStream(filePath);
+        Workbook workbook = new XSSFWorkbook(fis);
+        Sheet sheet = workbook.getSheetAt(0);
+
+        for (Row row : sheet) {
+            Cell codeCell = row.getCell(1); // Column B
+            Cell descCell = row.getCell(2); // Column C
+
+            if (codeCell == null || descCell == null) continue;
+
+            String code = codeCell.getCellType() == CellType.NUMERIC
+                    ? String.valueOf((long) codeCell.getNumericCellValue())
+                    : codeCell.getStringCellValue().trim();
+
+            String desc = descCell.getStringCellValue().trim();
+            map.put(code, desc);
+        }
+
+        workbook.close();
+        return map;
+    }
+
+    // JSON loader: returns Map<naicsCode, naicsDescription>
+    public static Map<String, String> loadNaicsFromJson(String filePath) throws IOException {
+        Map<String, String> map = new HashMap<>();
+        String content = new String(Files.readAllBytes(new File(filePath).toPath()));
+
+        JSONObject root = new JSONObject(content);
+        JSONObject data = root.getJSONObject("data");
+        JSONArray naicsArray = data.getJSONArray("naics");
+
+        for (int i = 0; i < naicsArray.length(); i++) {
+            JSONObject obj = naicsArray.getJSONObject(i);
+            map.put(obj.getString("naicsCode"), obj.getString("naicsDescription"));
+        }
+
+        return map;
+    }
+}
+
+
+
+-----------
+
+
+
 public static Set<String> loadNaicsCodesFromJson(String filePath) throws IOException {
     Set<String> codes = new HashSet<>();
     
