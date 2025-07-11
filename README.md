@@ -1,3 +1,22 @@
+
+public static Set<String> loadNaicsCodesFromJson(String filePath) throws IOException {
+    Set<String> codes = new HashSet<>();
+    
+    String content = new String(Files.readAllBytes(new File(filePath).toPath()));
+    
+    JSONObject jsonObject = new JSONObject(content);
+    JSONObject dataObject = jsonObject.getJSONObject("data"); // "data" key
+    JSONArray naicsArray = dataObject.getJSONArray("naics");   // "naics" array
+    
+    for (int i = 0; i < naicsArray.length(); i++) {
+        JSONObject obj = naicsArray.getJSONObject(i);
+        codes.add(obj.getString("naicsCode"));
+    }
+    
+    return codes;
+}
+
+
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.json.JSONArray;
