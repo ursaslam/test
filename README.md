@@ -1,3 +1,10 @@
+From the very beginning, I’ve felt genuinely welcomed into the Penn Mutual culture. The organization promotes a collaborative, respectful, and purpose-driven environment that aligns well with my values. I’ve appreciated how leadership encourages open communication and supports continuous learning, which has made it easy to integrate into both the team and the broader organization.
+
+I’ve developed strong working relationships with my teammates through daily stand-ups, knowledge-sharing sessions, and collaborative problem-solving. Whether it’s reviewing designs, pair programming, or navigating production issues, there’s a strong sense of trust and mutual respect within the group.
+
+I’ve also received encouraging feedback on my early contributions, particularly around delivering cloud-based solutions using Java and AWS that improved performance and maintainability. It was rewarding to see my ideas actively considered in design discussions, which made me feel both heard and valued.
+
+
 In my initial 90 days, I successfully transitioned into my role by leveraging my expertise in Java, cloud-native design, and AWS services. I demonstrated strong technical ownership by:
 	•	Designing and implementing scalable microservices using Java (Spring Boot) with secure API integrations.
 	•	Developing asynchronous, event-driven data pipelines using AWS services like Lambda, S3, DynamoDB, Step Functions, and Athena.
