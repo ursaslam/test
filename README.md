@@ -1,3 +1,34 @@
+
+PageIterable<MajescoParty> pages = getMajescoDataByEDT(edt);
+
+        List<MajescoParty> allRecords = new ArrayList<>();
+        pages.stream()
+             .flatMap(page -> page.items().stream())
+             .forEach(allRecords::add);
+
+        // Step 2: Convert to JSON
+        ObjectMapper mapper = new ObjectMapper();
+        String json = mapper.writeValueAsString(allRecords);
+
+        // Step 3: Upload to S3
+        S3Client s3Client = S3Client.create(); // configure with region or pass injected
+        PutObjectRequest putRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(s3Key)
+                .contentType("application/json")
+                .build();
+
+        s3Client.putObject(putRequest, software.amazon.awssdk.core.sync.RequestBody.fromString(json, StandardCharsets.UTF_8));
+        logger.log("JSON uploaded successfully to s3://" + bucketName + "/" + s3Key);
+
+    } catch (Exception e) {
+        logger.log("Error saving data to S3: " + e.getMessage());
+        e.printStackTrace();
+    }
+}
+
+
+
 public void processAsyncAndWriteToLists(String providedEdt, String jobId,
                                         List<Party> partiesList,
                                         List<Organization> organizationsList) {
