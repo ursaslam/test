@@ -2,6 +2,67 @@ public void processAsyncAndWriteToLists(String providedEdt, String jobId,
                                         List<Party> partiesList,
                                         List<Organization> organizationsList) {
 
+    CompletableFuture.runAsync(() -> {
+        try {
+            // Step 1: Prepare expression values
+            Map<String, AttributeValue> expressionValues = new HashMap<>();
+            expressionValues.put(":edtVal", AttributeValue.builder().s(providedEdt).build());  // Format should match "edt" type in DynamoDB
+
+            // Step 2: Build ScanRequest
+            ScanRequest.Builder scanBuilder = ScanRequest.builder()
+                    .tableName(DYNAMODB_TABLE)
+                    .filterExpression("edt > :edtVal")
+                    .expressionAttributeValues(expressionValues)
+                    .limit(500);
+
+            if (lastKey != null) {
+                scanBuilder.exclusiveStartKey(lastKey);
+            }
+
+            // Step 3: Scan
+            ScanResponse response = dynamoDbClient.scan(scanBuilder.build());
+
+            int responseSize = response.items().size();
+            rowCount += responseSize;
+            logger.log(":::: " + responseSize + " items found on batch " + batchNumber);
+
+            // Step 4: Process items
+            for (Map<String, AttributeValue> item : response.items()) {
+                String s3Key = item.get(s3Key_Label).s();
+                String entityType = item.get(partyTypeLabel).s();
+                String taxId = item.get("ssn").s();
+                String npn = item.get("npn").s();
+                String officeCode = item.get("prim_ofcd").s();
+
+                if (PARTY.equalsIgnoreCase(entityType)) {
+                    if (taxId != null && !taxId.isEmpty()) {
+                        Party party = new Party();
+                        party.setTaxId(taxId);
+                        synchronized (partiesList) {
+                            partiesList.add(party);
+                        }
+                    }
+                } else if (ORG.equalsIgnoreCase(entityType)) {
+                    Organization org = new Organization();
+                    org.setNpn(npn);
+                    org.setOfficeCode(officeCode);
+                    synchronized (organizationsList) {
+                        organizationsList.add(org);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.log("Error in async DynamoDB scan: " + e.getMessage());
+            e.printStackTrace();
+        }
+    });
+}
+
+
+public void processAsyncAndWriteToLists(String providedEdt, String jobId,
+                                        List<Party> partiesList,
+                                        List<Organization> organizationsList) {
+
     CompletableFuture.supplyAsync(() -> {
         ScanRequest.Builder scanBuilder = ScanRequest.builder()
             .tableName(DYNAMODB_TABLE)
