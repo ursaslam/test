@@ -1,4 +1,8 @@
-
+In my initial 90 days, I successfully transitioned into my role by leveraging my expertise in Java, cloud-native design, and AWS services. I demonstrated strong technical ownership by:
+	•	Designing and implementing scalable microservices using Java (Spring Boot) with secure API integrations.
+	•	Developing asynchronous, event-driven data pipelines using AWS services like Lambda, S3, DynamoDB, Step Functions, and Athena.
+	•	Optimizing performance in batch jobs by leveraging multithreaded processing, pagination, and S3 multipart uploads.
+	•	Building reusable and testable code components using best practices in object-oriented programming, functional programming (Java 8+), and unit testing frameworks (JUnit, Mockito).
 PageIterable<MajescoParty> pages = getMajescoDataByEDT(edt);
 
         List<MajescoParty> allRecords = new ArrayList<>();
