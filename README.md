@@ -1,4 +1,56 @@
 
+public CompletableFuture<Void> processAsync(String providedEdt, String jobId) {
+    return CompletableFuture.supplyAsync(() -> {
+        ScanRequest.Builder scanBuilder = ScanRequest.builder()
+            .tableName(DYNAMODB_TABLE)
+            .filterExpression("edt > :edtVal")
+            .expressionAttributeValues(expressionValues)
+            .limit(500);
+
+        if (lastKey != null) {
+            scanBuilder.exclusiveStartKey(lastKey);
+        }
+
+        return dynamoDbClient.scan(scanBuilder.build());
+    }).thenApply(response -> {
+        int responseSize = response.items().size();
+        rowCount += responseSize;
+        logger.log(":::: " + responseSize + " items found on batch " + batchNumber);
+
+        return response.items();
+    }).thenAcceptAsync(items -> {
+        List<CompletableFuture<Void>> futures = items.stream()
+            .map(item -> CompletableFuture.runAsync(() -> {
+                String s3Key = item.get(s3Key_Label).s();
+                String entityType = item.get(partyTypeLabel).s();
+                String taxId = item.get("ssn").s();
+                String npn = item.get("npn").s();
+                String officeCode = item.get("prim_ofcd").s();
+
+                List<String> partyErrorMessages = new ArrayList<>();
+
+                if (PARTY.equalsIgnoreCase(entityType)) {
+                    if (taxId != null && !taxId.isEmpty()) {
+                        Party party = new Party();
+                        party.setTaxId(taxId);
+                        parties.getParties().add(party);
+                    } else {
+                        partyErrorMessages.add("TAXID is NULL");
+                    }
+                } else {
+                    partyErrorMessages.add("Entity type mismatch");
+                }
+
+                // Optionally log or collect error messages
+            }))
+            .collect(Collectors.toList());
+
+        // Wait for all item processing to complete
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+
+
+
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.json.JSONArray;
