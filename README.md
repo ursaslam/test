@@ -1,395 +1,237 @@
-From the very beginning, I’ve felt genuinely welcomed into the Penn Mutual culture. The organization promotes a collaborative, respectful, and purpose-driven environment that aligns well with my values. I’ve appreciated how leadership encourages open communication and supports continuous learning, which has made it easy to integrate into both the team and the broader organization.
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>demo</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
 
-I’ve developed strong working relationships with my teammates through daily stand-ups, knowledge-sharing sessions, and collaborative problem-solving. Whether it’s reviewing designs, pair programming, or navigating production issues, there’s a strong sense of trust and mutual respect within the group.
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.3</version>
+        <relativePath/>
+    </parent>
 
-I’ve also received encouraging feedback on my early contributions, particularly around delivering cloud-based solutions using Java and AWS that improved performance and maintainability. It was rewarding to see my ideas actively considered in design discussions, which made me feel both heard and valued.
+    <dependencies>
+        <!-- Web -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
 
+        <!-- Feign -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
 
-In my initial 90 days, I successfully transitioned into my role by leveraging my expertise in Java, cloud-native design, and AWS services. I demonstrated strong technical ownership by:
-	•	Designing and implementing scalable microservices using Java (Spring Boot) with secure API integrations.
-	•	Developing asynchronous, event-driven data pipelines using AWS services like Lambda, S3, DynamoDB, Step Functions, and Athena.
-	•	Optimizing performance in batch jobs by leveraging multithreaded processing, pagination, and S3 multipart uploads.
-	•	Building reusable and testable code components using best practices in object-oriented programming, functional programming (Java 8+), and unit testing frameworks (JUnit, Mockito).
-PageIterable<MajescoParty> pages = getMajescoDataByEDT(edt);
+        <!-- OAuth2 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-client</artifactId>
+        </dependency>
 
-        List<MajescoParty> allRecords = new ArrayList<>();
-        pages.stream()
-             .flatMap(page -> page.items().stream())
-             .forEach(allRecords::add);
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
 
-        // Step 2: Convert to JSON
-        ObjectMapper mapper = new ObjectMapper();
-        String json = mapper.writeValueAsString(allRecords);
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>2023.0.1</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>
 
-        // Step 3: Upload to S3
-        S3Client s3Client = S3Client.create(); // configure with region or pass injected
-        PutObjectRequest putRequest = PutObjectRequest.builder()
-                .bucket(bucketName)
-                .key(s3Key)
-                .contentType("application/json")
-                .build();
+package com.example.demo.config;
 
-        s3Client.putObject(putRequest, software.amazon.awssdk.core.sync.RequestBody.fromString(json, StandardCharsets.UTF_8));
-        logger.log("JSON uploaded successfully to s3://" + bucketName + "/" + s3Key);
+import feign.RequestInterceptor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.*;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
-    } catch (Exception e) {
-        logger.log("Error saving data to S3: " + e.getMessage());
-        e.printStackTrace();
+import java.time.Instant;
+
+@Configuration
+public class OAuthFeignConfig {
+
+    @Value("${oauth2.client-id}")
+    private String clientId;
+
+    @Value("${oauth2.client-secret}")
+    private String clientSecret;
+
+    @Value("${oauth2.token-url}")
+    private String tokenUrl;
+
+    @Value("${oauth2.scope}")
+    private String scope;
+
+    private String cachedToken;
+    private Instant expiryTime;
+
+    private final RestTemplate restTemplate = new RestTemplate();
+
+    @Bean
+    public RequestInterceptor requestInterceptor() {
+        return template -> {
+            String token = getValidToken();
+            template.header("Authorization", "Bearer " + token);
+        };
+    }
+
+    private synchronized String getValidToken() {
+        if (cachedToken == null || Instant.now().isAfter(expiryTime)) {
+            cachedToken = fetchNewToken();
+        }
+        return cachedToken;
+    }
+
+    private String fetchNewToken() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("grant_type", "client_credentials");
+        body.add("client_id", clientId);
+        body.add("client_secret", clientSecret);
+        body.add("scope", scope);
+
+        HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
+
+        ResponseEntity<TokenResponse> response = restTemplate.exchange(
+                tokenUrl, HttpMethod.POST, request, TokenResponse.class);
+
+        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            TokenResponse tokenResponse = response.getBody();
+            cachedToken = tokenResponse.getAccessToken();
+            expiryTime = Instant.now().plusSeconds(tokenResponse.getExpiresIn() - 60);
+            System.out.println("Fetched new OAuth2 token, valid until: " + expiryTime);
+            return cachedToken;
+        } else {
+            throw new IllegalStateException("Failed to fetch OAuth2 token: " + response.getStatusCode());
+        }
     }
 }
+package com.example.demo.config;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Data;
 
+@Data
+public class TokenResponse {
+    @JsonProperty("access_token")
+    private String accessToken;
 
-public void processAsyncAndWriteToLists(String providedEdt, String jobId,
-                                        List<Party> partiesList,
-                                        List<Organization> organizationsList) {
+    @JsonProperty("token_type")
+    private String tokenType;
 
-    CompletableFuture.runAsync(() -> {
-        try {
-            // Step 1: Prepare expression values
-            Map<String, AttributeValue> expressionValues = new HashMap<>();
-            expressionValues.put(":edtVal", AttributeValue.builder().s(providedEdt).build());  // Format should match "edt" type in DynamoDB
+    @JsonProperty("expires_in")
+    private int expiresIn;
+}
+package com.example.demo.feign;
 
-            // Step 2: Build ScanRequest
-            ScanRequest.Builder scanBuilder = ScanRequest.builder()
-                    .tableName(DYNAMODB_TABLE)
-                    .filterExpression("edt > :edtVal")
-                    .expressionAttributeValues(expressionValues)
-                    .limit(500);
+import com.example.demo.model.ApiResponse;
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 
-            if (lastKey != null) {
-                scanBuilder.exclusiveStartKey(lastKey);
-            }
-
-            // Step 3: Scan
-            ScanResponse response = dynamoDbClient.scan(scanBuilder.build());
-
-            int responseSize = response.items().size();
-            rowCount += responseSize;
-            logger.log(":::: " + responseSize + " items found on batch " + batchNumber);
-
-            // Step 4: Process items
-            for (Map<String, AttributeValue> item : response.items()) {
-                String s3Key = item.get(s3Key_Label).s();
-                String entityType = item.get(partyTypeLabel).s();
-                String taxId = item.get("ssn").s();
-                String npn = item.get("npn").s();
-                String officeCode = item.get("prim_ofcd").s();
-
-                if (PARTY.equalsIgnoreCase(entityType)) {
-                    if (taxId != null && !taxId.isEmpty()) {
-                        Party party = new Party();
-                        party.setTaxId(taxId);
-                        synchronized (partiesList) {
-                            partiesList.add(party);
-                        }
-                    }
-                } else if (ORG.equalsIgnoreCase(entityType)) {
-                    Organization org = new Organization();
-                    org.setNpn(npn);
-                    org.setOfficeCode(officeCode);
-                    synchronized (organizationsList) {
-                        organizationsList.add(org);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.log("Error in async DynamoDB scan: " + e.getMessage());
-            e.printStackTrace();
-        }
-    });
+@FeignClient(
+    name = "webClient",
+    url = "${external.api.url}",
+    configuration = com.example.demo.config.OAuthFeignConfig.class
+)
+public interface WebClient {
+    @GetMapping("/your-api-path") // Replace with your actual API path
+    ResponseEntity<ApiResponse> getMappings();
 }
 
+package com.example.demo.controller;
 
-public void processAsyncAndWriteToLists(String providedEdt, String jobId,
-                                        List<Party> partiesList,
-                                        List<Organization> organizationsList) {
+import com.example.demo.feign.WebClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-    CompletableFuture.supplyAsync(() -> {
-        ScanRequest.Builder scanBuilder = ScanRequest.builder()
-            .tableName(DYNAMODB_TABLE)
-            .filterExpression("edt > :edtVal")
-            .expressionAttributeValues(expressionValues)
-            .limit(500);
+@RestController
+public class MappingController {
 
-        if (lastKey != null) {
-            scanBuilder.exclusiveStartKey(lastKey);
-        }
+    private final WebClient webClient;
 
-        return dynamoDbClient.scan(scanBuilder.build());
-    }).thenApply(response -> {
-        int responseSize = response.items().size();
-        rowCount += responseSize;
-        logger.log(":::: " + responseSize + " items found on batch " + batchNumber);
-        return response.items();
-    }).thenAcceptAsync(items -> {
-        List<CompletableFuture<Void>> itemFutures = items.stream()
-            .map(item -> CompletableFuture.runAsync(() -> {
-                String entityType = item.get(partyTypeLabel).s();
-                String taxId = item.get("ssn").s();
-                String npn = item.get("npn").s();
-                String officeCode = item.get("prim_ofcd").s();
-
-                if (PARTY.equalsIgnoreCase(entityType)) {
-                    if (taxId != null && !taxId.isEmpty()) {
-                        Party party = new Party();
-                        party.setTaxId(taxId);
-                        synchronized (partiesList) {
-                            partiesList.add(party);
-                        }
-                    }
-                } else if ("ORG".equalsIgnoreCase(entityType)) {
-                    Organization org = new Organization();
-                    org.setNpn(npn);
-                    org.setOfficeCode(officeCode);
-                    synchronized (organizationsList) {
-                        organizationsList.add(org);
-                    }
-                }
-            }))
-            .collect(Collectors.toList());
-
-        // Block until all are processed
-        CompletableFuture.allOf(itemFutures.toArray(new CompletableFuture[0])).join();
-    });
-}
-
-
-
-public CompletableFuture<Void> processAsync(String providedEdt, String jobId) {
-    return CompletableFuture.supplyAsync(() -> {
-        ScanRequest.Builder scanBuilder = ScanRequest.builder()
-            .tableName(DYNAMODB_TABLE)
-            .filterExpression("edt > :edtVal")
-            .expressionAttributeValues(expressionValues)
-            .limit(500);
-
-        if (lastKey != null) {
-            scanBuilder.exclusiveStartKey(lastKey);
-        }
-
-        return dynamoDbClient.scan(scanBuilder.build());
-    }).thenApply(response -> {
-        int responseSize = response.items().size();
-        rowCount += responseSize;
-        logger.log(":::: " + responseSize + " items found on batch " + batchNumber);
-
-        return response.items();
-    }).thenAcceptAsync(items -> {
-        List<CompletableFuture<Void>> futures = items.stream()
-            .map(item -> CompletableFuture.runAsync(() -> {
-                String s3Key = item.get(s3Key_Label).s();
-                String entityType = item.get(partyTypeLabel).s();
-                String taxId = item.get("ssn").s();
-                String npn = item.get("npn").s();
-                String officeCode = item.get("prim_ofcd").s();
-
-                List<String> partyErrorMessages = new ArrayList<>();
-
-                if (PARTY.equalsIgnoreCase(entityType)) {
-                    if (taxId != null && !taxId.isEmpty()) {
-                        Party party = new Party();
-                        party.setTaxId(taxId);
-                        parties.getParties().add(party);
-                    } else {
-                        partyErrorMessages.add("TAXID is NULL");
-                    }
-                } else {
-                    partyErrorMessages.add("Entity type mismatch");
-                }
-
-                // Optionally log or collect error messages
-            }))
-            .collect(Collectors.toList());
-
-        // Wait for all item processing to complete
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-
-
-
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.io.*;
-import java.nio.file.Files;
-import java.util.*;
-
-public class NaicsCodeComparator {
-
-    public static void main(String[] args) throws Exception {
-        String excelPath = "src/main/resources/Filtered_Naics.xlsx";
-        String jsonPath = "src/main/resources/naicscode_list.json";
-
-        Map<String, String> excelMap = loadNaicsFromExcel(excelPath);
-        Map<String, String> jsonMap = loadNaicsFromJson(jsonPath);
-
-        Set<String> commonCodes = new HashSet<>(excelMap.keySet());
-        commonCodes.retainAll(jsonMap.keySet());
-
-        List<String> exactMatches = new ArrayList<>();
-        List<String> mismatchedDescriptions = new ArrayList<>();
-
-        for (String code : commonCodes) {
-            String excelDesc = excelMap.get(code).trim();
-            String jsonDesc = jsonMap.get(code).trim();
-            if (excelDesc.equalsIgnoreCase(jsonDesc)) {
-                exactMatches.add(code);
-            } else {
-                mismatchedDescriptions.add(code + " ➤ Excel: " + excelDesc + " | JSON: " + jsonDesc);
-            }
-        }
-
-        Set<String> onlyInExcel = new HashSet<>(excelMap.keySet());
-        onlyInExcel.removeAll(jsonMap.keySet());
-
-        Set<String> onlyInJson = new HashSet<>(jsonMap.keySet());
-        onlyInJson.removeAll(excelMap.keySet());
-
-        // Print summary
-        System.out.println("✅ Exact Code+Description Matches: " + exactMatches.size());
-        System.out.println("⚠️ Mismatched Descriptions: " + mismatchedDescriptions.size());
-        System.out.println("❌ Missing in JSON: " + onlyInExcel);
-        System.out.println("❌ Missing in Excel: " + onlyInJson);
-        System.out.println("\n🔍 Description Mismatches:");
-        mismatchedDescriptions.forEach(System.out::println);
+    public MappingController(WebClient webClient) {
+        this.webClient = webClient;
     }
 
-    // Excel loader: returns Map<naicsCode, naicsDescription>
-    public static Map<String, String> loadNaicsFromExcel(String filePath) throws IOException {
-        Map<String, String> map = new HashMap<>();
-        FileInputStream fis = new FileInputStream(filePath);
-        Workbook workbook = new XSSFWorkbook(fis);
-        Sheet sheet = workbook.getSheetAt(0);
-
-        for (Row row : sheet) {
-            Cell codeCell = row.getCell(1); // Column B
-            Cell descCell = row.getCell(2); // Column C
-
-            if (codeCell == null || descCell == null) continue;
-
-            String code = codeCell.getCellType() == CellType.NUMERIC
-                    ? String.valueOf((long) codeCell.getNumericCellValue())
-                    : codeCell.getStringCellValue().trim();
-
-            String desc = descCell.getStringCellValue().trim();
-            map.put(code, desc);
-        }
-
-        workbook.close();
-        return map;
-    }
-
-    // JSON loader: returns Map<naicsCode, naicsDescription>
-    public static Map<String, String> loadNaicsFromJson(String filePath) throws IOException {
-        Map<String, String> map = new HashMap<>();
-        String content = new String(Files.readAllBytes(new File(filePath).toPath()));
-
-        JSONObject root = new JSONObject(content);
-        JSONObject data = root.getJSONObject("data");
-        JSONArray naicsArray = data.getJSONArray("naics");
-
-        for (int i = 0; i < naicsArray.length(); i++) {
-            JSONObject obj = naicsArray.getJSONObject(i);
-            map.put(obj.getString("naicsCode"), obj.getString("naicsDescription"));
-        }
-
-        return map;
+    @GetMapping("/mappings")
+    public Object getMappings() {
+        return webClient.getMappings().getBody().getRecord().getMappings();
     }
 }
+package com.example.demo.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Data;
 
-
------------
-
-
-
-public static Set<String> loadNaicsCodesFromJson(String filePath) throws IOException {
-    Set<String> codes = new HashSet<>();
-    
-    String content = new String(Files.readAllBytes(new File(filePath).toPath()));
-    
-    JSONObject jsonObject = new JSONObject(content);
-    JSONObject dataObject = jsonObject.getJSONObject("data"); // "data" key
-    JSONArray naicsArray = dataObject.getJSONArray("naics");   // "naics" array
-    
-    for (int i = 0; i < naicsArray.length(); i++) {
-        JSONObject obj = naicsArray.getJSONObject(i);
-        codes.add(obj.getString("naicsCode"));
-    }
-    
-    return codes;
+@Data
+public class ApiResponse {
+    @JsonProperty("record")
+    private Record record;
 }
 
+package com.example.demo.model;
 
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Data;
+import java.util.List;
 
-import java.io.*;
-import java.util.*;
-
-public class NAICSCodeMatcher {
-    public static void main(String[] args) throws Exception {
-        // Load Excel NAICS codes
-        Set<String> excelCodes = loadNaicsCodesFromExcel("path_to_excel.xlsx");
-
-        // Load JSON NAICS codes
-        Set<String> jsonCodes = loadNaicsCodesFromJson("path_to_json.json");
-
-        // Match
-        Set<String> common = new HashSet<>(excelCodes);
-        common.retainAll(jsonCodes);
-
-        Set<String> inExcelNotInJson = new HashSet<>(excelCodes);
-        inExcelNotInJson.removeAll(jsonCodes);
-
-        Set<String> inJsonNotInExcel = new HashSet<>(jsonCodes);
-        inJsonNotInExcel.removeAll(excelCodes);
-
-        // Print results
-        System.out.println("✅ Common Codes: " + common);
-        System.out.println("❌ Missing in JSON: " + inExcelNotInJson);
-        System.out.println("❌ Missing in Excel: " + inJsonNotInExcel);
-    }
-
-    private static Set<String> loadNaicsCodesFromExcel(String filePath) throws Exception {
-        Set<String> codes = new HashSet<>();
-        FileInputStream fis = new FileInputStream(filePath);
-        Workbook workbook = new XSSFWorkbook(fis);
-        Sheet sheet = workbook.getSheetAt(0);
-
-        for (Row row : sheet) {
-            Cell cell = row.getCell(1); // Column B
-            if (cell != null && cell.getCellType() == CellType.NUMERIC) {
-                codes.add(String.valueOf((long) cell.getNumericCellValue()));
-            } else if (cell != null && cell.getCellType() == CellType.STRING) {
-                codes.add(cell.getStringCellValue().trim());
-            }
-        }
-        workbook.close();
-        return codes;
-    }
-
-    private static Set<String> loadNaicsCodesFromJson(String filePath) throws Exception {
-        Set<String> codes = new HashSet<>();
-        StringBuilder sb = new StringBuilder();
-        BufferedReader br = new BufferedReader(new FileReader(filePath));
-        String line;
-
-        while ((line = br.readLine()) != null) {
-            sb.append(line);
-        }
-        br.close();
-
-        JSONArray jsonArray = new JSONArray(sb.toString());
-        for (int i = 0; i < jsonArray.length(); i++) {
-            JSONObject obj = jsonArray.getJSONObject(i);
-            codes.add(obj.getString("naicsCode"));
-        }
-        return codes;
-    }
+@Data
+public class Record {
+    @JsonProperty("mappings")
+    private List<Mapping> mappings;
 }
+
+package com.example.demo.model;
+
+import lombok.Data;
+
+@Data
+public class Mapping {
+    private String mpgName;
+    private String mpgDesc;
+    private String strtDt;
+    private String endDt;
+    private String srcSysCd;
+    private String srcSysMpgCdNm;
+    private String srcSysMpgCdVal;
+    private String srcSysMpgCdValDesc;
+    private String tgtSysCd;
+    private String tgtSysMpgCdNm;
+    private String tgtSysMpgCdVal;
+    private String tgtSysMpgCdValDesc;
+    private String community;
+    private String domain;
+    private String sts;
+}
+
+external.api.url=
+
+
+
+oauth2.client-id=YOUR_CLIENT_ID
+oauth2.client-secret=YOUR_CLIENT_SECRET
+oauth2.token-url=
+oauth2.scope=YOUR_SCOPE
