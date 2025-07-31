@@ -1,4 +1,41 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0"
+
+List<CompletableFuture<Void>> orgFutures = new ArrayList<>();
+
+for (MajescoParty majescoParty : majescoOrgBatch) {
+    try {
+        CompletableFuture<Void> future = s3StorageManager
+            .getMajescoOrgAsync(majescoParty.getS3Key())
+            .thenAccept(org -> {
+                if (org == null) {
+                    logger.error("Error fetching organization for party {}", majescoParty.getId());
+                    return;
+                }
+                synchronized (organizations) {
+                    organizations.add(org);
+                }
+                synchronized (parties) {
+                    parties.add(orgTransformer.execute(org));
+                }
+                logger.info("Added org for party {}", majescoParty.getId());
+            })
+            .exceptionally(ex -> {
+                logger.error("Async error fetching org for party {}", majescoParty.getId(), ex);
+                return null;
+            });
+
+        orgFutures.add(future);  // ✅ collect futures here
+
+    } catch (Exception ex) {
+        logger.error("Invalid s3 path {}", majescoParty.getS3Key(), ex);
+        throw new RuntimeException("Invalid s3 path " + majescoParty.getS3Key(), ex);
+    }
+}
+
+// ✅ Ensure all async work completes before returning
+CompletableFuture.allOf(orgFutures.toArray(new CompletableFuture[0])).join();
+
+
+project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
