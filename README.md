@@ -1,17 +1,3 @@
-Core classes overview
-
-We'll build:
-
-TransformResult<T> → holds transformed data + list of errors.
-
-BaseTransformer<T> → provides the safe execution wrapper.
-
-SafeExecutor → wraps each field operation (so 100+ field checks stay clean).
-
-Actual transformers → extend BaseTransformer and focus only on logic.
-
-Main orchestrator → runs through a list of objects and collects all errors.
-
 ✅ Step 1: TransformResult<T>
 
 Keeps track of transformation outcome and any errors captured.
@@ -198,3 +184,10 @@ public class TransformerApp {
         return c;
     }
 }
+
+✅ Example Output
+Transformed: Customer{name='ALICE', age=31, address=Address{city='NEW YORK', zip='10001'}}
+Transformed: Customer{name='null', age=26, address=Address{city='BOSTON', zip='20002'}}
+  Errors: [Field 'name' failed: Cannot invoke "String.toUpperCase()" because "name" is null]
+Transformed: Customer{name='CHARLIE', age=null, address=Address{city='null', zip='30003'}}
+  Errors: [Field 'age' failed: Cannot invoke "Integer.intValue()" because "age" is null
