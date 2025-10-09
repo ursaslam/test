@@ -1,65 +1,33 @@
-✅ Step 1: TransformResult<T>
+Keep this generic — you’ll use it inside your existing transformer.
 
-Keeps track of transformation outcome and any errors captured.
+package com.comcast.fcs.util;
 
-import java.util.ArrayList;
-import java.util.List;
+public abstract class BaseTransformer<I, O> {
 
-public class TransformResult<T> {
-    private T transformedObject;
-    private final List<String> errors = new ArrayList<>();
-
-    public void addError(String field, Exception e) {
-        errors.add("Field '" + field + "' failed: " + e.getMessage());
-    }
-
-    public void setTransformedObject(T obj) {
-        this.transformedObject = obj;
-    }
-
-    public T getTransformedObject() {
-        return transformedObject;
-    }
-
-    public List<String> getErrors() {
-        return errors;
-    }
-
-    public boolean hasErrors() {
-        return !errors.isEmpty();
-    }
-}
-
-✅ Step 2: BaseTransformer<T>
-
-Defines a safe entry point (safeTransform) that all subclasses inherit.
-
-public abstract class BaseTransformer<T> {
-
-    public TransformResult<T> safeTransform(T input) {
-        TransformResult<T> result = new TransformResult<>();
+    public TransformResult<O> safeTransform(I input) {
+        TransformResult<O> result = new TransformResult<>();
 
         try {
-            transform(input, result); // delegate actual logic
-            result.setTransformedObject(input);
+            O output = transform(input, result);
+            result.setTransformedObject(output);
         } catch (Exception e) {
-            // Catch any unhandled error from child transformer
             result.addError("global", e);
         }
 
         return result;
     }
 
-    // Each subclass implements this with field-level transformations
-    protected abstract void transform(T input, TransformResult<T> result);
+    protected abstract O transform(I input, TransformResult<O> result);
 }
 
-✅ Step 3: SafeExecutor
+🧰 2. SafeExecutor
 
-Used inside transformers to safely run risky field operations.
+No change.
+
+package com.comcast.fcs.util;
 
 public class SafeExecutor {
-    public static <T> void safeRun(String fieldName, Runnable action, TransformResult<T> result) {
+    public static void safeRun(String fieldName, Runnable action, TransformResult<?> result) {
         try {
             action.run();
         } catch (NullPointerException e) {
@@ -70,124 +38,148 @@ public class SafeExecutor {
     }
 }
 
-✅ Step 4: Example Data Models
-public class Customer {
-    private String name;
-    private Address address;
-    private Integer age;
+🧮 3. TransformResult
 
-    // Getters and Setters
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+No change needed either.
 
-    public Address getAddress() { return address; }
-    public void setAddress(Address address) { this.address = address; }
+package com.comcast.fcs.util;
 
-    public Integer getAge() { return age; }
-    public void setAge(Integer age) { this.age = age; }
+import java.util.ArrayList;
+import java.util.List;
 
-    @Override
-    public String toString() {
-        return "Customer{name='" + name + "', age=" + age + ", address=" + address + '}';
+public class TransformResult<T> {
+
+    private final List<String> errors = new ArrayList<>();
+    private T transformedObject;
+
+    public void addError(String fieldName, Exception e) {
+        errors.add("[" + fieldName + "] failed: " + e.getMessage());
+    }
+
+    public List<String> getErrors() {
+        return errors;
+    }
+
+    public void setTransformedObject(T transformedObject) {
+        this.transformedObject = transformedObject;
+    }
+
+    public T getTransformedObject() {
+        return transformedObject;
     }
 }
 
-public class Address {
-    private String city;
-    private String zip;
+🧠 4. DCMPartyTransformer (final version)
+package com.comcast.dcm.transformer;
 
-    public String getCity() { return city; }
-    public void setCity(String city) { this.city = city; }
+import com.honda.party.Party as HondaParty;
+import com.comcast.dcm.model.Party as DcmParty;
+import com.comcast.fcs.util.SafeExecutor;
+import com.comcast.fcs.util.TransformResult;
+import com.comcast.fcs.util.BaseTransformer;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
-    public String getZip() { return zip; }
-    public void setZip(String zip) { this.zip = zip; }
+@Component
+public class DCMPartyTransformer implements Transformer<DcmParty> {
 
-    @Override
-    public String toString() {
-        return "Address{city='" + city + "', zip='" + zip + "'}";
+    private final DCMPersonTransformer personTransformer;
+    private final DCMAddressTransformer addressTransformer;
+    private final DCMPhoneTransformer phoneTransformer;
+    private final DCMProducerTransformer producerTransformer;
+    private final DCMPartyExtensionTransformer partyExtensionTransformer;
+    private final DCMEMailAddressTransformer eMailAddressTransformer;
+    private final DCMDrLpsTransformer drLpsTransformer;
+
+    @Autowired
+    public DCMPartyTransformer(
+            DCMPersonTransformer personTransformer,
+            DCMAddressTransformer addressTransformer,
+            DCMPhoneTransformer phoneTransformer,
+            DCMProducerTransformer producerTransformer,
+            DCMPartyExtensionTransformer partyExtensionTransformer,
+            DCMEMailAddressTransformer eMailAddressTransformer,
+            DCMDrLpsTransformer drLpsTransformer) {
+
+        this.personTransformer = personTransformer;
+        this.addressTransformer = addressTransformer;
+        this.phoneTransformer = phoneTransformer;
+        this.producerTransformer = producerTransformer;
+        this.partyExtensionTransformer = partyExtensionTransformer;
+        this.eMailAddressTransformer = eMailAddressTransformer;
+        this.drLpsTransformer = drLpsTransformer;
     }
-}
 
-✅ Step 5: Child Transformers
-🔹 AddressTransformer
-public class AddressTransformer extends BaseTransformer<Address> {
+    // The execute() method comes from your existing Transformer interface
     @Override
-    protected void transform(Address address, TransformResult<Address> result) {
-        SafeExecutor.safeRun("city", () -> {
-            address.setCity(address.getCity().trim().toUpperCase());
-        }, result);
+    public HondaParty execute(DcmParty response) {
+        // internally delegate to a local base transformer that handles safety
+        DCMPartyBaseSafeTransformer safeTransformer = new DCMPartyBaseSafeTransformer();
+        TransformResult<HondaParty> result = safeTransformer.safeTransform(response);
 
-        SafeExecutor.safeRun("zip", () -> {
-            address.setZip(address.getZip().replaceAll("-", ""));
-        }, result);
-    }
-}
-
-🔹 CustomerTransformer
-public class CustomerTransformer extends BaseTransformer<Customer> {
-    private final AddressTransformer addressTransformer = new AddressTransformer();
-
-    @Override
-    protected void transform(Customer customer, TransformResult<Customer> result) {
-        SafeExecutor.safeRun("name", () -> {
-            customer.setName(customer.getName().toUpperCase());
-        }, result);
-
-        SafeExecutor.safeRun("age", () -> {
-            customer.setAge(customer.getAge() + 1);
-        }, result);
-
-        // Nested transformer call
-        SafeExecutor.safeRun("address", () -> {
-            TransformResult<Address> addrResult = addressTransformer.safeTransform(customer.getAddress());
-            result.getErrors().addAll(addrResult.getErrors());
-        }, result);
-    }
-}
-
-✅ Step 6: Orchestrator / Main Flow
-import java.util.*;
-
-public class TransformerApp {
-    public static void main(String[] args) {
-        List<Customer> customers = Arrays.asList(
-                makeCustomer("Alice", "New York", "100-01", 30),
-                makeCustomer(null, "Boston", "200-02", 25),
-                makeCustomer("Charlie", null, "300-03", null)
-        );
-
-        CustomerTransformer transformer = new CustomerTransformer();
-        List<TransformResult<Customer>> results = new ArrayList<>();
-
-        for (Customer c : customers) {
-            TransformResult<Customer> res = transformer.safeTransform(c);
-            results.add(res);
+        if (!result.getErrors().isEmpty()) {
+            System.err.println("Transformation completed with errors: " + result.getErrors());
         }
 
-        // Print results
-        results.forEach(r -> {
-            System.out.println("Transformed: " + r.getTransformedObject());
-            if (r.hasErrors()) {
-                System.out.println("  Errors: " + r.getErrors());
-            }
-        });
+        return result.getTransformedObject();
     }
 
-    private static Customer makeCustomer(String name, String city, String zip, Integer age) {
-        Customer c = new Customer();
-        Address a = new Address();
-        a.setCity(city);
-        a.setZip(zip);
-        c.setAddress(a);
-        c.setName(name);
-        c.setAge(age);
-        return c;
+    /**
+     * Inner class to reuse BaseTransformer pattern safely
+     */
+    private class DCMPartyBaseSafeTransformer extends BaseTransformer<DcmParty, HondaParty> {
+        @Override
+        protected HondaParty transform(DcmParty source, TransformResult<HondaParty> result) {
+            HondaParty target = new HondaParty();
+
+            if (source != null) {
+                try {
+                    target.setPartyType("Person");
+                    target.setPartyId(source.getGuid());
+                    target.setFullName(source.getPerson() != null ? source.getPerson().getFullName() : null);
+
+                    // safely run nested transformers
+                    SafeExecutor.safeRun("person", () ->
+                        target.setPerson(personTransformer.execute(source.getPerson())),
+                        result
+                    );
+
+                    SafeExecutor.safeRun("address", () ->
+                        target.setAddresses(addressTransformer.execute(source.getAddresses())),
+                        result
+                    );
+
+                    SafeExecutor.safeRun("phone", () ->
+                        target.setPhones(phoneTransformer.execute(source.getPhones())),
+                        result
+                    );
+
+                    SafeExecutor.safeRun("producer", () ->
+                        target.setProducer(producerTransformer.execute(source.getProducer())),
+                        result
+                    );
+
+                    SafeExecutor.safeRun("extension", () ->
+                        target.setExtensions(partyExtensionTransformer.execute(source.getPartyExtensions())),
+                        result
+                    );
+
+                    SafeExecutor.safeRun("email", () ->
+                        target.setEmails(eMailAddressTransformer.execute(source.getEmailAddresses())),
+                        result
+                    );
+
+                    SafeExecutor.safeRun("drLps", () ->
+                        target.setDrLps(drLpsTransformer.execute(source.getDrLps())),
+                        result
+                    );
+
+                } catch (Exception e) {
+                    result.addError("global", e);
+                }
+            }
+
+            return target;
+        }
     }
 }
-
-✅ Example Output
-Transformed: Customer{name='ALICE', age=31, address=Address{city='NEW YORK', zip='10001'}}
-Transformed: Customer{name='null', age=26, address=Address{city='BOSTON', zip='20002'}}
-  Errors: [Field 'name' failed: Cannot invoke "String.toUpperCase()" because "name" is null]
-Transformed: Customer{name='CHARLIE', age=null, address=Address{city='null', zip='30003'}}
-  Errors: [Field 'age' failed: Cannot invoke "Integer.intValue()" because "age" is null
