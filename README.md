@@ -1,105 +1,200 @@
-Step 1: Define a SafeTransformer that collects errors
-import java.util.function.Function;
+Core classes overview
+
+We'll build:
+
+TransformResult<T> → holds transformed data + list of errors.
+
+BaseTransformer<T> → provides the safe execution wrapper.
+
+SafeExecutor → wraps each field operation (so 100+ field checks stay clean).
+
+Actual transformers → extend BaseTransformer and focus only on logic.
+
+Main orchestrator → runs through a list of objects and collects all errors.
+
+✅ Step 1: TransformResult<T>
+
+Keeps track of transformation outcome and any errors captured.
+
+import java.util.ArrayList;
 import java.util.List;
 
-public class SafeTransformer {
+public class TransformResult<T> {
+    private T transformedObject;
+    private final List<String> errors = new ArrayList<>();
 
-    public static <T, R> Function<T, R> safe(Function<T, R> transformer, List<String> errorList) {
-        return t -> {
-            try {
-                return transformer.apply(t);
-            } catch (Exception e) {
-                String errorMessage = "Error transforming " + t + ": " + e.getMessage();
-                errorList.add(errorMessage);
-                return null; // return null if failed
-            }
-        };
+    public void addError(String field, Exception e) {
+        errors.add("Field '" + field + "' failed: " + e.getMessage());
+    }
+
+    public void setTransformedObject(T obj) {
+        this.transformedObject = obj;
+    }
+
+    public T getTransformedObject() {
+        return transformedObject;
+    }
+
+    public List<String> getErrors() {
+        return errors;
+    }
+
+    public boolean hasErrors() {
+        return !errors.isEmpty();
     }
 }
 
-Step 2: Apply transformers and capture errors
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.function.Function;
+✅ Step 2: BaseTransformer<T>
 
-class Person {
-    String name;
-    Integer age;
+Defines a safe entry point (safeTransform) that all subclasses inherit.
 
-    public Person(String name, Integer age) {
-        this.name = name;
-        this.age = age;
+public abstract class BaseTransformer<T> {
+
+    public TransformResult<T> safeTransform(T input) {
+        TransformResult<T> result = new TransformResult<>();
+
+        try {
+            transform(input, result); // delegate actual logic
+            result.setTransformedObject(input);
+        } catch (Exception e) {
+            // Catch any unhandled error from child transformer
+            result.addError("global", e);
+        }
+
+        return result;
     }
+
+    // Each subclass implements this with field-level transformations
+    protected abstract void transform(T input, TransformResult<T> result);
+}
+
+✅ Step 3: SafeExecutor
+
+Used inside transformers to safely run risky field operations.
+
+public class SafeExecutor {
+    public static <T> void safeRun(String fieldName, Runnable action, TransformResult<T> result) {
+        try {
+            action.run();
+        } catch (NullPointerException e) {
+            result.addError(fieldName, e);
+        } catch (Exception e) {
+            result.addError(fieldName, e);
+        }
+    }
+}
+
+✅ Step 4: Example Data Models
+public class Customer {
+    private String name;
+    private Address address;
+    private Integer age;
+
+    // Getters and Setters
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Address getAddress() { return address; }
+    public void setAddress(Address address) { this.address = address; }
+
+    public Integer getAge() { return age; }
+    public void setAge(Integer age) { this.age = age; }
 
     @Override
     public String toString() {
-        return "Person{name='" + name + "', age=" + age + "}";
+        return "Customer{name='" + name + "', age=" + age + ", address=" + address + '}';
     }
 }
 
-public class TransformerExample {
+public class Address {
+    private String city;
+    private String zip;
+
+    public String getCity() { return city; }
+    public void setCity(String city) { this.city = city; }
+
+    public String getZip() { return zip; }
+    public void setZip(String zip) { this.zip = zip; }
+
+    @Override
+    public String toString() {
+        return "Address{city='" + city + "', zip='" + zip + "'}";
+    }
+}
+
+✅ Step 5: Child Transformers
+🔹 AddressTransformer
+public class AddressTransformer extends BaseTransformer<Address> {
+    @Override
+    protected void transform(Address address, TransformResult<Address> result) {
+        SafeExecutor.safeRun("city", () -> {
+            address.setCity(address.getCity().trim().toUpperCase());
+        }, result);
+
+        SafeExecutor.safeRun("zip", () -> {
+            address.setZip(address.getZip().replaceAll("-", ""));
+        }, result);
+    }
+}
+
+🔹 CustomerTransformer
+public class CustomerTransformer extends BaseTransformer<Customer> {
+    private final AddressTransformer addressTransformer = new AddressTransformer();
+
+    @Override
+    protected void transform(Customer customer, TransformResult<Customer> result) {
+        SafeExecutor.safeRun("name", () -> {
+            customer.setName(customer.getName().toUpperCase());
+        }, result);
+
+        SafeExecutor.safeRun("age", () -> {
+            customer.setAge(customer.getAge() + 1);
+        }, result);
+
+        // Nested transformer call
+        SafeExecutor.safeRun("address", () -> {
+            TransformResult<Address> addrResult = addressTransformer.safeTransform(customer.getAddress());
+            result.getErrors().addAll(addrResult.getErrors());
+        }, result);
+    }
+}
+
+✅ Step 6: Orchestrator / Main Flow
+import java.util.*;
+
+public class TransformerApp {
     public static void main(String[] args) {
-        List<Person> persons = Arrays.asList(
-            new Person("Alice", 25),
-            new Person(null, 30), // will cause NPE in name transformation
-            new Person("Bob", null) // will cause NPE in age transformation
+        List<Customer> customers = Arrays.asList(
+                makeCustomer("Alice", "New York", "100-01", 30),
+                makeCustomer(null, "Boston", "200-02", 25),
+                makeCustomer("Charlie", null, "300-03", null)
         );
 
-        List<String> errors = new ArrayList<>();
+        CustomerTransformer transformer = new CustomerTransformer();
+        List<TransformResult<Customer>> results = new ArrayList<>();
 
-        Function<Person, Person> transformer1 = SafeTransformer.safe(p -> {
-            // Uppercase name, may throw NPE
-            p.name = p.name.toUpperCase();
-            return p;
-        }, errors);
+        for (Customer c : customers) {
+            TransformResult<Customer> res = transformer.safeTransform(c);
+            results.add(res);
+        }
 
-        Function<Person, Person> transformer2 = SafeTransformer.safe(p -> {
-            // Calculate birth year, may throw NPE
-            p.age = 2025 - p.age;
-            return p;
-        }, errors);
+        // Print results
+        results.forEach(r -> {
+            System.out.println("Transformed: " + r.getTransformedObject());
+            if (r.hasErrors()) {
+                System.out.println("  Errors: " + r.getErrors());
+            }
+        });
+    }
 
-        List<Function<Person, Person>> transformers = Arrays.asList(transformer1, transformer2);
-
-        List<Person> transformed = persons.stream()
-            .map(p -> {
-                Person temp = p;
-                for (Function<Person, Person> t : transformers) {
-                    temp = t.apply(temp);
-                }
-                return temp;
-            })
-            .filter(Objects::nonNull) // skip failed transformations
-            .collect(Collectors.toList());
-
-        System.out.println("Transformed Persons:");
-        transformed.forEach(System.out::println);
-
-        System.out.println("\nErrors:");
-        errors.forEach(System.out::println);
+    private static Customer makeCustomer(String name, String city, String zip, Integer age) {
+        Customer c = new Customer();
+        Address a = new Address();
+        a.setCity(city);
+        a.setZip(zip);
+        c.setAddress(a);
+        c.setName(name);
+        c.setAge(age);
+        return c;
     }
 }
-
-✅ Output Example:
-Transformed Persons:
-Person{name='ALICE', age=2000}
-
-Errors:
-Error transforming Person{name='null', age=30}: null
-Error transforming Person{name='Bob', age=null}: null
-
-Key Advantages:
-
-Errors are captured in a list — you can log them, report them, or persist them.
-
-Loop continues even if some items fail.
-
-No try/catch clutter inside every transformer.
-
-Filter out failed transformations if desired (filter(Objects::nonNull)).
-
-If you want, I can also give a version where even partially transformed Person objects are preserved and errors are just logged per field instead of discarding the object. This is useful when you don’t want to lose any data.
-
-Do you want me to do that?
-
-ChatGPT can make mistakes. Check important info.
