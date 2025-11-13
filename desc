@@ -1,0 +1,132 @@
+Top-Level Fields
+
+dataset_name
+
+Name of the target dataset (curated version).
+
+Here: "financial_transactions_curated"
+
+description
+
+Human-readable description of the dataset and its purpose.
+
+Useful for documentation.
+
+fields
+
+An array of field-level mappings between source and target.
+
+Each item represents one column/field and includes metadata, validation rules, and mapping info.
+
+created_date
+
+Date when this metadata mapping was created or updated.
+
+Useful for versioning and tracking changes.
+
+Field-Level Metadata
+
+Each field object has these keys:
+
+field_name
+
+Name of the field in the target dataset.
+
+Example: "transaction_id"
+
+source_field
+
+Name of the field in the source/raw dataset.
+
+If the field is newly added, it’s "-"
+
+target_field
+
+Name of the field in the target dataset. Usually same as field_name.
+
+source_type
+
+Data type of the field in the source dataset.
+
+Example: "decimal(10,2)"
+
+target_type
+
+Data type of the field in the target dataset.
+
+Can differ from source if type conversion happens.
+
+nullable
+
+Indicates whether this field can have NULL values in the target dataset.
+
+Example: false means mandatory.
+
+primary_key
+
+Whether the field is part of the primary key in the target dataset.
+
+Example: "transaction_id" is the primary key.
+
+allowed_values
+
+Optional enumeration of valid values.
+
+Example: "transaction_type" can only be "debit" or "credit".
+
+constraints
+
+Any numeric or range constraints.
+
+Example: "amount" has min 0.01 and max 1000000.00.
+
+change_type
+
+Indicates how the field changed from source to target. Options include:
+
+"renamed" → name changed
+
+"type_modified" → data type changed
+
+"added" → new field in target dataset
+
+Example Breakdown: transaction_type Field
+{
+  "field_name": "transaction_type",
+  "source_field": "-",
+  "target_field": "transaction_type",
+  "source_type": "-",
+  "target_type": "string",
+  "nullable": false,
+  "primary_key": false,
+  "allowed_values": ["debit", "credit"],
+  "constraints": null,
+  "change_type": "added"
+}
+
+
+Explanation:
+
+This field does not exist in source (source_field: "-")
+
+Added in the target dataset (change_type: "added")
+
+It’s mandatory (nullable: false)
+
+Only allows "debit" or "credit" as valid values (allowed_values)
+
+Features of this Glue Script
+
+Dynamic field mapping from a JSON mapping file:
+
+Handles renames, type conversions, and new fields.
+
+Validation rules:
+
+Null checks, numeric constraints, allowed values for categorical fields.
+
+Partitioned write for optimized storage and query performance.
+
+Fully reusable:
+
+Update the JSON file, and the Glue job adapts automatically to schema changes.
