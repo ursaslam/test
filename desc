@@ -28,7 +28,15 @@ print(pretty_schema)
 
 # Save schema JSON to S3
 s3_output_path = "s3://your-bucket-name/path/to/schema.json"
-spark.sparkContext.parallelize([pretty_schema]).saveAsTextFile(s3_output_path)
+s3 = boto3.client('s3')
+
+# Parse bucket name and key from S3 path
+bucket = s3_output_path.split("/")[2]
+key = "/".join(s3_output_path.split("/")[3:])
+
+# Upload JSON
+s3.put_object(Bucket=bucket, Key=key, Body=pretty_schema.encode('utf-8'))
+print(f"Schema saved to {s3_output_path}")
 
 
 
