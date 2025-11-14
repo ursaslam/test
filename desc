@@ -1,3 +1,29 @@
+import sys
+from awsglue.context import GlueContext
+from pyspark.context import SparkContext
+
+# Initialize Glue context
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+
+# S3 path to your Parquet file
+s3_path = "s3://your-bucket-name/path/to/file.parquet"
+
+# Read the Parquet file
+df = spark.read.parquet(s3_path)
+
+# Show the schema
+df.printSchema()
+
+# Optional: show first few rows
+df.show(5)
+
+
+
+
+
+
 Top-Level Fields
 
 dataset_name
