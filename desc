@@ -1,44 +1,37 @@
-import sys
 from awsglue.context import GlueContext
 from pyspark.context import SparkContext
+import json
+import boto3
 
 # Initialize Glue context
 sc = SparkContext()
 glueContext = GlueContext(sc)
 spark = glueContext.spark_session
 
-# S3 path to your Parquet file
-s3_path = "s3://your-bucket-name/path/to/file.parquet"
+# Read Parquet file
+s3_input_path = "s3://your-bucket-name/path/to/file.parquet"
+df = spark.read.parquet(s3_input_path)
 
-# Read the Parquet file
-df = spark.read.parquet(s3_path)
+# Convert schema to JSON dict
+schema_dict = json.loads(df.schema.json())
 
-# Show the schema
-df.printSchema()
+# Add new fields using existing field values
+for field in schema_dict['fields']:
+    field['description'] = f"Column {field['name']} of type {field['type']}"
+    field['source'] = field['name']   # use existing field name as value
+    field['target'] = field['name']   # can also use existing field name or transform as needed
 
-# Optional: show first few rows
-df.show(5)
-# Convert schema to JSON
-schema_json = df.schema.json()
-schema_dict = json.loads(schema_json)
+# Convert back to pretty JSON
+updated_schema_json = json.dumps(schema_dict, indent=4)
 
-# Pretty-print JSON (optional)
-pretty_schema = json.dumps(schema_dict, indent=4)
-print(pretty_schema)
-
-# Save schema JSON to S3
-s3_output_path = "s3://your-bucket-name/path/to/schema.json"
+# Save updated schema to S3
+s3_output_path = "s3://your-bucket-name/path/to/updated_schema.json"
 s3 = boto3.client('s3')
-
-# Parse bucket name and key from S3 path
 bucket = s3_output_path.split("/")[2]
 key = "/".join(s3_output_path.split("/")[3:])
+s3.put_object(Bucket=bucket, Key=key, Body=updated_schema_json.encode('utf-8'))
 
-# Upload JSON
-s3.put_object(Bucket=bucket, Key=key, Body=pretty_schema.encode('utf-8'))
-print(f"Schema saved to {s3_output_path}")
-
-
+print(f"Updated schema saved to {s3_output_path}")
 
 
 
