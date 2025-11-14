@@ -8,6 +8,74 @@ sc = SparkContext()
 glueContext = GlueContext(sc)
 spark = glueContext.spark_session
 
+# ------------------------------
+# Read Parquet file
+# ------------------------------
+s3_input_path = "s3://your-bucket-name/path/to/file.parquet"
+df = spark.read.parquet(s3_input_path)
+
+# ------------------------------
+# CLEAN SCHEMA: Remove metadata
+# ------------------------------
+clean_schema = {
+    "fields": []
+}
+
+for field in df.schema.fields:
+    clean_schema["fields"].append({
+        "name": field.name,
+        "type": field.dataType.simpleString(),   # clean datatype
+        "nullable": field.nullable
+    })
+
+# ------------------------------
+# Add custom field-level details
+# ------------------------------
+for field in clean_schema["fields"]:
+    field["description"] = f"Column {field['name']} description"
+    field["source"] = "s3_source"
+    field["target"] = "curated_layer"
+
+# ------------------------------
+# Convert to pretty JSON
+# ------------------------------
+updated_schema_json = json.dumps(clean_schema, indent=4)
+
+# ------------------------------
+# Save JSON back to S3
+# ------------------------------
+s3_output_path = "s3://your-bucket-name/path/to/updated_schema.json"
+s3 = boto3.client('s3')
+
+bucket = s3_output_path.split("/")[2]
+key = "/".join(s3_output_path.split("/")[3:])
+
+s3.put_object(
+    Bucket=bucket,
+    Key=key,
+    Body=updated_schema_json.encode("utf-8")
+)
+
+print(f"Updated schema saved to {s3_output_path}")
+
+
+
+
+
+
+
+
+
+from awsglue.context import GlueContext
+from pyspark.context import SparkContext
+import json
+import boto3
+
+# Initialize Glue context
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+
 # Read Parquet file
 s3_input_path = "s3://your-bucket-name/path/to/file.parquet"
 df = spark.read.parquet(s3_input_path)
