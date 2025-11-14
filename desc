@@ -18,7 +18,17 @@ df.printSchema()
 
 # Optional: show first few rows
 df.show(5)
+# Convert schema to JSON
+schema_json = df.schema.json()
+schema_dict = json.loads(schema_json)
 
+# Pretty-print JSON (optional)
+pretty_schema = json.dumps(schema_dict, indent=4)
+print(pretty_schema)
+
+# Save schema JSON to S3
+s3_output_path = "s3://your-bucket-name/path/to/schema.json"
+spark.sparkContext.parallelize([pretty_schema]).saveAsTextFile(s3_output_path)
 
 
 
