@@ -81,10 +81,20 @@ s3.put_object(
 # ============================================================
 
 meta_raw = spark.read.text(metadata_path).collect()[0][0]
-metadata = json.loads(meta_raw)
+# Fix common JSON issues: single quotes -> double quotes
+meta_fixed = meta_raw.replace("'", '"')
+
+# Remove trailing commas before closing brackets/braces
+meta_fixed = re.sub(r",(\s*[\]}])", r"\1", meta_fixed)
+
+# Load JSON safely
+try:
+    metadata = json.loads(meta_fixed)
+except json.JSONDecodeError as e:
+    raise Exception(f"Failed to parse metadata JSON after auto-fix: {e}")
+
 mapping_fields = metadata["fields"]
-
-
+print(f"[METADATA] Loaded {len(mapping_fields)} field mappings successfully")
 # ============================================================
 # STEP 4 — METADATA-DRIVEN FIELD MAPPING
 # ============================================================
