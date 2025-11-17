@@ -62,46 +62,49 @@ s3.put_object(Bucket=bucket, Key=key, Body=updated_schema_json.encode('utf-8'))
 
 print(f"[SCHEMA] Updated schema saved to: {updated_schema_path}")
 
-from pyspark.sql.types import StructType, StructField, StringType
-
 # ------------------------------------------------------------
 # STEP 3 — LOAD METADATA (SPARK 2.3 SAFE)
 # ------------------------------------------------------------
-
-# Define the schema manually (must include at least one primitive type)
+# Define schema manually for Spark 2.3
 metadata_schema = StructType([
     StructField("source_field", StringType(), True),
     StructField("target_field", StringType(), True),
     StructField("change_type", StringType(), True),
     StructField("target_type", StringType(), True),
-    StructField("constraints", StringType(), True),     # optional JSON as string
-    StructField("allowed_values", StringType(), True)   # optional JSON as string
+    StructField("constraints", StringType(), True),
+    StructField("allowed_values", StringType(), True)
 ])
 
-# Read metadata JSON using manual schema
 meta_df = spark.read.schema(metadata_schema).json(metadata_path)
 
-# Convert rows to dicts
+# Convert rows to list of dicts and safely parse optional fields
 mapping_fields = []
 for row in meta_df.collect():
     row_dict = row.asDict()
-    
-    # Convert constraints and allowed_values from string to dict/list if needed
-    if row_dict.get("constraints"):
+
+    # Convert constraints
+    constraints_val = row_dict.get("constraints")
+    if constraints_val is not None and isinstance(constraints_val, str) and constraints_val.strip() != "":
         try:
-            row_dict["constraints"] = json.loads(row_dict["constraints"])
+            row_dict["constraints"] = json.loads(constraints_val)
         except:
             row_dict["constraints"] = None
-    if row_dict.get("allowed_values"):
+    else:
+        row_dict["constraints"] = None
+
+    # Convert allowed_values
+    allowed_vals = row_dict.get("allowed_values")
+    if allowed_vals is not None and isinstance(allowed_vals, str) and allowed_vals.strip() != "":
         try:
-            row_dict["allowed_values"] = json.loads(row_dict["allowed_values"])
+            row_dict["allowed_values"] = json.loads(allowed_vals)
         except:
             row_dict["allowed_values"] = None
+    else:
+        row_dict["allowed_values"] = None
 
     mapping_fields.append(row_dict)
 
 print(f"[METADATA] Loaded {len(mapping_fields)} field mappings safely on Spark 2.3")
-
 
 # ------------------------------------------------------------
 # STEP 4 — METADATA-DRIVEN FIELD MAPPING
@@ -131,15 +134,16 @@ valid_df = df
 for f in mapping_fields:
     col_name = f["target_field"]
     # min/max constraints
-    if "constraints" in f:
-        min_v = f["constraints"]["min"]
-        max_v = f["constraints"]["max"]
-        bad = valid_df.filter((col(col_name) < min_v) | (col(col_name) > max_v)) \
-            .withColumn("error_reason", lit(f"{col_name} outside range"))
-        reject_df = reject_df.unionByName(bad)
-        valid_df = valid_df.filter((col(col_name) >= min_v) & (col(col_name) <= max_v))
+    if f.get("constraints"):
+        min_v = f["constraints"].get("min")
+        max_v = f["constraints"].get("max")
+        if min_v is not None and max_v is not None:
+            bad = valid_df.filter((col(col_name) < min_v) | (col(col_name) > max_v)) \
+                .withColumn("error_reason", lit(f"{col_name} outside range"))
+            reject_df = reject_df.unionByName(bad)
+            valid_df = valid_df.filter((col(col_name) >= min_v) & (col(col_name) <= max_v))
     # allowed values
-    if "allowed_values" in f:
+    if f.get("allowed_values"):
         allowed_vals = f["allowed_values"]
         bad = valid_df.filter(~col(col_name).isin(allowed_vals)) \
             .withColumn("error_reason", lit(f"{col_name} invalid value"))
