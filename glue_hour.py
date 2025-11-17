@@ -62,16 +62,46 @@ s3.put_object(Bucket=bucket, Key=key, Body=updated_schema_json.encode('utf-8'))
 
 print(f"[SCHEMA] Updated schema saved to: {updated_schema_path}")
 
-# ------------------------------------------------------------
-# STEP 3 — LOAD METADATA (SAFE JSON READ)
-# ------------------------------------------------------------
-# Use spark.read.json for robust loading of multi-line or BOM-containing JSON
-meta_df = spark.read.json(metadata_path)
+from pyspark.sql.types import StructType, StructField, StringType
 
-# Convert to list of dicts
-mapping_fields = [row.asDict() for row in meta_df.collect()]
+# ------------------------------------------------------------
+# STEP 3 — LOAD METADATA (SPARK 2.3 SAFE)
+# ------------------------------------------------------------
 
-print(f"[METADATA] Loaded {len(mapping_fields)} field mappings successfully")
+# Define the schema manually (must include at least one primitive type)
+metadata_schema = StructType([
+    StructField("source_field", StringType(), True),
+    StructField("target_field", StringType(), True),
+    StructField("change_type", StringType(), True),
+    StructField("target_type", StringType(), True),
+    StructField("constraints", StringType(), True),     # optional JSON as string
+    StructField("allowed_values", StringType(), True)   # optional JSON as string
+])
+
+# Read metadata JSON using manual schema
+meta_df = spark.read.schema(metadata_schema).json(metadata_path)
+
+# Convert rows to dicts
+mapping_fields = []
+for row in meta_df.collect():
+    row_dict = row.asDict()
+    
+    # Convert constraints and allowed_values from string to dict/list if needed
+    if row_dict.get("constraints"):
+        try:
+            row_dict["constraints"] = json.loads(row_dict["constraints"])
+        except:
+            row_dict["constraints"] = None
+    if row_dict.get("allowed_values"):
+        try:
+            row_dict["allowed_values"] = json.loads(row_dict["allowed_values"])
+        except:
+            row_dict["allowed_values"] = None
+
+    mapping_fields.append(row_dict)
+
+print(f"[METADATA] Loaded {len(mapping_fields)} field mappings safely on Spark 2.3")
+
 
 # ------------------------------------------------------------
 # STEP 4 — METADATA-DRIVEN FIELD MAPPING
