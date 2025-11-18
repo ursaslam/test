@@ -80,7 +80,9 @@ try:
     log_json("info", "read_input", f"Reading input from {src_prefix}")
 
     df = spark.read.format(data_format).load(src_prefix)
-    log_json("info", "read_input", "Source read complete", row_count=df.count())
+    src_count_initial = df.count()
+
+    log_json("info", "read_input", "Source read complete", row_count=src_count_initial)
 
 
     # ------------------------------------------------------------
@@ -116,8 +118,7 @@ try:
     # 5) DEDUPE
     # ------------------------------------------------------------
     if id_cols and upd_cols:
-        log_json("info", "dedupe", "Running dedupe",
-                 id_cols=id_cols, upd_cols=upd_cols)
+        log_json("info", "dedupe", "Running dedupe", id_cols=id_cols, upd_cols=upd_cols)
 
         w = Window.partitionBy(*id_cols).orderBy(
             *[F.col(u).desc() for u in upd_cols]
@@ -158,13 +159,16 @@ try:
         # type conversion
         if src_dtype != tgt_dtype:
             valid_df = valid_df.withColumn(col, F.col(col).cast(tgt_dtype))
-            log_json("info", "datatype_cast", f"Casting {col}", src_dtype=src_dtype, tgt_dtype=tgt_dtype)
+            log_json("info", "datatype_cast", f"Casting {col}",
+                     src_dtype=src_dtype, tgt_dtype=tgt_dtype)
 
         # null check
         if not nullable:
             failed = valid_df.filter(F.col(col).isNull())
             if failed.count() > 0:
-                log_json("warn", "dq_null", f"Null check failed on {col}", failed_rows=failed.count())
+                log_json("warn", "dq_null",
+                         f"Null check failed on {col}",
+                         failed_rows=failed.count())
                 reject_df = failed if reject_df is None else reject_df.union(failed)
             valid_df = valid_df.filter(F.col(col).isNotNull())
 
@@ -172,11 +176,52 @@ try:
         if regex:
             failed = valid_df.filter(~F.col(col).rlike(regex))
             if failed.count() > 0:
-                log_json("warn", "dq_regex", f"Regex check failed on {col}", failed_rows=failed.count())
+                log_json("warn", "dq_regex",
+                         f"Regex check failed on {col}",
+                         failed_rows=failed.count())
                 reject_df = reject_df.union(failed) if reject_df else failed
             valid_df = valid_df.filter(F.col(col).rlike(regex))
 
     log_json("info", "transform", "Column-level transformations complete")
+
+
+    # ------------------------------------------------------------
+    # 6.1) ROW COUNT CHECK (Source vs Curated)
+    # ------------------------------------------------------------
+    src_count = src_count_initial
+    curated_count = valid_df.count()
+    rejected_count = src_count - curated_count
+    mismatch = (src_count != curated_count)
+
+    log_json(
+        "info",
+        "row_count_check",
+        "Row count comparison complete",
+        source_count=src_count,
+        curated_count=curated_count,
+        rejected_count=rejected_count,
+        mismatch=mismatch
+    )
+
+    if mismatch:
+        log_json(
+            "warn",
+            "row_count_check",
+            "Row count mismatch detected",
+            source_count=src_count,
+            curated_count=curated_count,
+            rejected_rows=rejected_count,
+            pct_loss=f"{round((rejected_count/src_count)*100, 2)}%" if src_count > 0 else "0%"
+        )
+    else:
+        log_json(
+            "info",
+            "row_count_check",
+            "Row count validation passed",
+            source_count=src_count,
+            curated_count=curated_count,
+            rejected_rows=rejected_count
+        )
 
 
     # ------------------------------------------------------------
