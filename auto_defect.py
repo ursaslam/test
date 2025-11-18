@@ -14,55 +14,21 @@ spark = glueContext.spark_session
 
 
 # ------------------------------------------------------------
-# === USER CONFIGURABLE INPUTS (per dataset) ===
+# === HARDCODED INPUTS FOR NOW ===
 # ------------------------------------------------------------
 dataset_name = "financial_transactions"
 
-# Hardcoded prefix
 src_prefix = "s3://your-landing-bucket/data/financial_transactions/"
 
-# Output JSON path
-output_json_path = f"s3://your-test-bucket/metadata/{dataset_name}.json"
+# Where to write the metadata JSON
+output_json_path = f"s3://your-bucket/metadata/{dataset_name}.json"
+
+# Force format (can use auto detect later)
+dataset_format = "parquet"   # or "csv"
 
 
 # ------------------------------------------------------------
-# AUTO-DETECT DATASET FORMAT (CSV vs PARQUET)
-# ------------------------------------------------------------
-def detect_dataset_format(src_prefix):
-    s3 = boto3.client("s3")
-    bucket = src_prefix.split("/")[2]
-    prefix = "/".join(src_prefix.split("/")[3:])
-
-    resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-
-    if "Contents" not in resp:
-        raise Exception(f"No objects found under prefix: {src_prefix}")
-
-    formats_found = set()
-
-    for obj in resp["Contents"]:
-        key = obj["Key"].lower()
-
-        if key.endswith(".parquet"):
-            formats_found.add("parquet")
-        elif key.endswith(".csv") or key.endswith(".csv.gz") or key.endswith(".txt"):
-            formats_found.add("csv")
-
-    if "parquet" in formats_found:
-        return "parquet"
-
-    if "csv" in formats_found:
-        return "csv"
-
-    raise Exception(f"Cannot auto-detect format under: {src_prefix}")
-
-
-dataset_format = detect_dataset_format(src_prefix)
-print("✔ Detected dataset format:", dataset_format)
-
-
-# ------------------------------------------------------------
-# READ SAMPLE FILE BASED ON DETECTED FORMAT
+# === Read source sample ===
 # ------------------------------------------------------------
 if dataset_format == "csv":
     df = spark.read.option("header", True).csv(src_prefix)
@@ -73,19 +39,25 @@ schema = df.schema
 
 
 # ------------------------------------------------------------
-# Helper Functions
+# === Helper Functions ===
 # ------------------------------------------------------------
 def dtype_string(dt):
+    """Return valid Spark dtype string: decimal(precision,scale) or dt.simpleString()."""
     if isinstance(dt, DecimalType):
-        return f"decimal({dt.precision})"
-    return str(dt)
+        return f"decimal({dt.precision},{dt.scale})"
+    return dt.simpleString()
 
 def extract_precision(dt):
+    """Extract precision for decimals, else empty."""
     return dt.precision if isinstance(dt, DecimalType) else ""
+
+def extract_scale(dt):
+    """Extract scale for decimals, else empty."""
+    return dt.scale if isinstance(dt, DecimalType) else ""
 
 
 # ------------------------------------------------------------
-# Build Columns Section
+# === Build Column Metadata ===
 # ------------------------------------------------------------
 cols_meta = []
 
@@ -94,47 +66,69 @@ for f in schema.fields:
     cols_meta.append({
         "src_nm": f.name,
         "tgt_nm": f.name,
+
+        # correct Spark types
         "src_dtype": dtype_string(f.dataType),
         "tgt_dtype": dtype_string(f.dataType),
+
         "precision": extract_precision(f.dataType),
+        "scale": extract_scale(f.dataType),
+
+        # formats (always empty, no nulls)
         "src_fmt": "",
         "tgt_fmt": "",
+
         "nullable": f.nullable,
         "required_src": True,
+
         "regex": "",
         "len": "",
+
         "chg_types": [],
+
         "comment": f"Business definition for {f.name}"
     })
 
 
 # ------------------------------------------------------------
-# Build Final Metadata JSON
+# === FULL METADATA JSON CONTRACT ===
 # ------------------------------------------------------------
 metadata_json = {
     "ds": {
         "nm": dataset_name,
         "ver": "1.0",
-        "desc": f"Metadata contract for {dataset_name} dataset",
+        "desc": f"Metadata contract for {dataset_name}",
+
+        # dataset-level properties
         "src_sys": "source_system",
-        "tgt_sys": "GlueCatalog",
+        "tgt_sys": "glue_catalog",
         "format": dataset_format,
+
+        # prefix only — NOT specific file names
         "src_prefix": src_prefix,
+
+        # business/key columns
         "id_cols": ["txn_id"],
+
+        # update/sort columns (used for dedupe)
         "upd_cols": ["ingest_ts"],
+
+        # dataset-level DQ rules
         "dq_rules": {
             "check_schema": True,
             "check_row_count": True,
             "allow_extra_columns": True,
             "allow_missing_columns": False
         },
+
+        # column-level metadata
         "cols": cols_meta
     }
 }
 
 
 # ------------------------------------------------------------
-# WRITE JSON TO S3
+# === WRITE METADATA JSON TO S3 ===
 # ------------------------------------------------------------
 s3 = boto3.client("s3")
 bucket = output_json_path.split("/")[2]
@@ -146,4 +140,4 @@ s3.put_object(
     Body=json.dumps(metadata_json, indent=4)
 )
 
-print("✔ Metadata JSON created successfully:", output_json_path)
+print("✔ Metadata JSON generated successfully:", output_json_path)
